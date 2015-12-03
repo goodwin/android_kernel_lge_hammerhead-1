@@ -922,6 +922,7 @@ static void mdss_mdp_overlay_cleanup(struct msm_fb_data_type *mfd,
 		else
 			__mdss_mdp_overlay_free_list_add(mfd, &pipe->front_buf);
 		mdss_mdp_data_free(&pipe->back_buf);
+		list_del_init(&pipe->list);
 		mdss_mdp_pipe_destroy(pipe);
 	}
 	mutex_unlock(&mdp5_data->list_lock);
@@ -1188,6 +1189,7 @@ int mdss_mdp_overlay_kickoff(struct msm_fb_data_type *mfd,
 	struct mdss_overlay_private *mdp5_data = mfd_to_mdp5_data(mfd);
 	struct mdss_mdp_pipe *pipe, *tmp;
 	struct mdss_mdp_ctl *ctl = mfd_to_ctl(mfd);
+	struct mdp_display_commit temp_data;
 	int ret = 0;
 	int sd_in_pipe = 0;
 	bool need_cleanup = false;
@@ -1198,6 +1200,7 @@ int mdss_mdp_overlay_kickoff(struct msm_fb_data_type *mfd,
 		mdss_mdp_ctl_notify(ctl, MDP_NOTIFY_FRAME_BEGIN);
 		mdss_mdp_ctl_notify(ctl, MDP_NOTIFY_FRAME_READY);
 		mutex_lock(ctl->shared_lock);
+		mutex_lock(ctl->wb_lock);
 	}
 
 	mutex_lock(&mdp5_data->ov_lock);
@@ -1253,8 +1256,18 @@ int mdss_mdp_overlay_kickoff(struct msm_fb_data_type *mfd,
 
 	__vsync_set_vsync_handler(mfd);
 
-	if (data)
+	if (data) {
 		mdss_mdp_set_roi(ctl, data);
+	} else {
+		temp_data.l_roi = (struct mdp_rect){0, 0,
+			ctl->mixer_left->width, ctl->mixer_left->height};
+		if (ctl->mixer_right) {
+			temp_data.r_roi = (struct mdp_rect) {0, 0,
+			ctl->mixer_right->width, ctl->mixer_right->height};
+		}
+		mdss_mdp_set_roi(ctl, &temp_data);
+	}
+
 
 	/*
 	 * Setup pipe in solid fill before unstaging,
@@ -1318,8 +1331,10 @@ commit_fail:
 		mdss_mdp_ctl_notify(ctl, MDP_NOTIFY_FRAME_START);
 
 	mutex_unlock(&mdp5_data->ov_lock);
-	if (ctl->shared_lock)
+	if (ctl->shared_lock) {
+		mutex_unlock(ctl->wb_lock);
 		mutex_unlock(ctl->shared_lock);
+	}
 	mdss_iommu_ctrl(0);
 	ATRACE_END(__func__);
 
@@ -2263,11 +2278,6 @@ static int mdss_mdp_pp_ioctl(struct msm_fb_data_type *mfd,
 	u32 copyback = 0;
 	u32 copy_from_kernel = 0;
 
-	if (mfd->panel_info->partial_update_enabled) {
-		pr_err("Partical update feature is enabled.");
-		return -EPERM;
-	}
-
 	ret = copy_from_user(&mdp_pp, argp, sizeof(mdp_pp));
 	if (ret)
 		return ret;
@@ -2380,11 +2390,6 @@ static int mdss_mdp_histo_ioctl(struct msm_fb_data_type *mfd, u32 cmd,
 	u32 block;
 	u32 pp_bus_handle;
 	static int req = -1;
-
-	if (mfd->panel_info->partial_update_enabled) {
-		pr_err("Partical update feature is enabled.");
-		return -EPERM;
-	}
 
 	switch (cmd) {
 	case MSMFB_HISTOGRAM_START:

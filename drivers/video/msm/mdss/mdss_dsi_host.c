@@ -858,7 +858,7 @@ static int mdss_dsi_cmds2buf_tx(struct mdss_dsi_ctrl_pdata *ctrl,
 		if (!len) {
 			pr_err("%s: failed to add cmd = 0x%x\n",
 				__func__,  cm->payload[0]);
-			return -EINVAL;
+			return 0;
 		}
 		tot += len;
 		if (dchdr->last) {
@@ -872,7 +872,7 @@ static int mdss_dsi_cmds2buf_tx(struct mdss_dsi_ctrl_pdata *ctrl,
 				mdss_dsi_disable_irq(ctrl, DSI_CMD_TERM);
 				pr_err("%s: failed to call cmd_dma_tx for cmd = 0x%x\n",
 					__func__,  cmds->payload[0]);
-				return -EINVAL;
+				return 0;
 			}
 
 			if (!wait || dchdr->wait > VSYNC_PERIOD)
@@ -927,7 +927,7 @@ static inline bool __mdss_dsi_cmd_mode_config(
 int mdss_dsi_cmds_tx(struct mdss_dsi_ctrl_pdata *ctrl,
 		struct dsi_cmd_desc *cmds, int cnt)
 {
-	int ret = 0;
+	int len = 0;
 	bool ctrl_restore = false, mctrl_restore = false;
 	struct mdss_dsi_ctrl_pdata *mctrl = NULL;
 
@@ -958,11 +958,9 @@ int mdss_dsi_cmds_tx(struct mdss_dsi_ctrl_pdata *ctrl,
 
 	ctrl_restore = __mdss_dsi_cmd_mode_config(ctrl, 1);
 
-	ret = mdss_dsi_cmds2buf_tx(ctrl, cmds, cnt);
-	if (IS_ERR_VALUE(ret)) {
+	len = mdss_dsi_cmds2buf_tx(ctrl, cmds, cnt);
+	if (!len)
 		pr_err("%s: failed to call\n", __func__);
-		cnt = -EINVAL;
-	}
 
 	if (mctrl_restore)
 		__mdss_dsi_cmd_mode_config(mctrl, 0);
@@ -970,7 +968,7 @@ int mdss_dsi_cmds_tx(struct mdss_dsi_ctrl_pdata *ctrl,
 	if (ctrl_restore)
 		__mdss_dsi_cmd_mode_config(ctrl, 0);
 
-	return cnt;
+	return len;
 }
 
 /* MIPI_DSI_MRPS, Maximum Return Packet Size */
@@ -1351,17 +1349,12 @@ void mdss_dsi_cmd_mdp_busy(struct mdss_dsi_ctrl_pdata *ctrl)
 int mdss_dsi_cmdlist_tx(struct mdss_dsi_ctrl_pdata *ctrl,
 				struct dcs_cmd_req *req)
 {
-	int ret, ret_val = -EINVAL;
-
-	ret = mdss_dsi_cmds_tx(ctrl, req->cmds, req->cmds_cnt);
-
-	if (!IS_ERR_VALUE(ret))
-		ret_val = 0;
+	int len = mdss_dsi_cmds_tx(ctrl, req->cmds, req->cmds_cnt);
 
 	if (req->cb)
-		req->cb(ret);
+		req->cb(len);
 
-	return ret_val;
+	return len;
 }
 
 int mdss_dsi_cmdlist_rx(struct mdss_dsi_ctrl_pdata *ctrl,
@@ -1394,13 +1387,17 @@ int mdss_dsi_cmdlist_rx(struct mdss_dsi_ctrl_pdata *ctrl,
 int mdss_dsi_cmdlist_commit(struct mdss_dsi_ctrl_pdata *ctrl, int from_mdp)
 {
 	struct dcs_cmd_req *req;
+	struct mdss_panel_info *pinfo;
+	struct mdss_rect *roi = NULL;
 	int ret = -EINVAL;
 	int rc = 0;
 
 	if (mdss_get_sd_client_cnt())
 		return -EPERM;
 
-	mutex_lock(&ctrl->cmd_mutex);
+	if (from_mdp)	/* from mdp kickoff */
+		mutex_lock(&ctrl->cmd_mutex);
+
 	req = mdss_dsi_cmdlist_get(ctrl);
 
 	MDSS_XLOG(ctrl->ndx, from_mdp, ctrl->mdp_busy, current->pid,
@@ -1409,7 +1406,8 @@ int mdss_dsi_cmdlist_commit(struct mdss_dsi_ctrl_pdata *ctrl, int from_mdp)
 	/* make sure dsi_cmd_mdp is idle */
 	mdss_dsi_cmd_mdp_busy(ctrl);
 
-	pr_debug("%s:  from_mdp=%d pid=%d\n", __func__, from_mdp, current->pid);
+	pr_debug("%s: ctrl=%d from_mdp=%d pid=%d\n", __func__,
+				ctrl->ndx, from_mdp, current->pid);
 
 	if (req == NULL)
 		goto need_lock;
@@ -1451,12 +1449,30 @@ int mdss_dsi_cmdlist_commit(struct mdss_dsi_ctrl_pdata *ctrl, int from_mdp)
 
 need_lock:
 
-	if (from_mdp) /* from pipe_commit */
-		mdss_dsi_cmd_mdp_start(ctrl);
+	MDSS_XLOG(ctrl->ndx, from_mdp, ctrl->mdp_busy, current->pid,
+							XLOG_FUNC_EXIT);
+
+	if (from_mdp) { /* from mdp kickoff */
+		/*
+		 * when partial update enabled, the roi of pinfo
+		 * is updated before mdp kickoff. Either width or
+		 * height of roi is 0, then it is false kickoff so
+		 * no mdp_busy flag set needed.
+		 * when partial update disabled, mdp_busy flag
+		 * alway set.
+		 */
+		pinfo = &ctrl->panel_data.panel_info;
+		if (pinfo->partial_update_enabled)
+			roi = &pinfo->roi;
+
+		if (!roi || (roi->w != 0 || roi->h != 0))
+			mdss_dsi_cmd_mdp_start(ctrl);
+
+		mutex_unlock(&ctrl->cmd_mutex);
+	}
 
 	MDSS_XLOG(ctrl->ndx, from_mdp, ctrl->mdp_busy, current->pid,
 							XLOG_FUNC_EXIT);
-	mutex_unlock(&ctrl->cmd_mutex);
 	return ret;
 }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2014, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -136,13 +136,6 @@ struct splash_pipe_cfg {
 struct mdss_mdp_ctl;
 typedef void (*mdp_vsync_handler_t)(struct mdss_mdp_ctl *, ktime_t);
 
-struct mdss_mdp_img_rect {
-	u16 x;
-	u16 y;
-	u16 w;
-	u16 h;
-};
-
 struct mdss_mdp_vsync_handler {
 	bool enabled;
 	bool cmd_post_flush;
@@ -197,7 +190,9 @@ struct mdss_mdp_ctl {
 	struct mdss_mdp_mixer *mixer_left;
 	struct mdss_mdp_mixer *mixer_right;
 	struct mutex lock;
+	struct mutex offlock;
 	struct mutex *shared_lock;
+	struct mutex *wb_lock;
 	spinlock_t spin_lock;
 
 	struct mdss_panel_data *panel_data;
@@ -206,9 +201,10 @@ struct mdss_mdp_ctl {
 	struct work_struct recover_work;
 	struct work_struct remove_underrun_handler;
 
-	struct mdss_mdp_img_rect roi;
-	struct mdss_mdp_img_rect roi_bkup;
+	struct mdss_rect roi;
+	struct mdss_rect roi_bkup;
 	u8 roi_changed;
+	u8 valid_roi;
 
 	int (*start_fnc) (struct mdss_mdp_ctl *ctl);
 	int (*stop_fnc) (struct mdss_mdp_ctl *ctl, int panel_power_state);
@@ -242,7 +238,7 @@ struct mdss_mdp_mixer {
 	u8 params_changed;
 	u16 width;
 	u16 height;
-	struct mdss_mdp_img_rect roi;
+	struct mdss_rect roi;
 	u8 cursor_enabled;
 	u8 rotator_mode;
 
@@ -395,8 +391,8 @@ struct mdss_mdp_pipe {
 	u16 img_height;
 	u8 horz_deci;
 	u8 vert_deci;
-	struct mdss_mdp_img_rect src;
-	struct mdss_mdp_img_rect dst;
+	struct mdss_rect src;
+	struct mdss_rect dst;
 	struct mdss_mdp_format_params *src_fmt;
 	struct mdss_mdp_plane_sizes src_planes;
 
@@ -616,7 +612,7 @@ int mdss_mdp_perf_bw_check(struct mdss_mdp_ctl *ctl,
 		struct mdss_mdp_pipe **left_plist, int left_cnt,
 		struct mdss_mdp_pipe **right_plist, int right_cnt);
 int mdss_mdp_perf_calc_pipe(struct mdss_mdp_pipe *pipe,
-	struct mdss_mdp_perf_params *perf, struct mdss_mdp_img_rect *roi,
+	struct mdss_mdp_perf_params *perf, struct mdss_rect *roi,
 	bool apply_fudge);
 int mdss_mdp_ctl_notify(struct mdss_mdp_ctl *ctl, int event);
 void mdss_mdp_ctl_notifier_register(struct mdss_mdp_ctl *ctl,
@@ -736,12 +732,12 @@ void mdss_mdp_data_free(struct mdss_mdp_data *data);
 
 u32 mdss_get_panel_framerate(struct msm_fb_data_type *mfd);
 int mdss_mdp_calc_phase_step(u32 src, u32 dst, u32 *out_phase);
-void mdss_mdp_intersect_rect(struct mdss_mdp_img_rect *res_rect,
-	const struct mdss_mdp_img_rect *dst_rect,
-	const struct mdss_mdp_img_rect *sci_rect);
-void mdss_mdp_crop_rect(struct mdss_mdp_img_rect *src_rect,
-	struct mdss_mdp_img_rect *dst_rect,
-	const struct mdss_mdp_img_rect *sci_rect);
+void mdss_mdp_intersect_rect(struct mdss_rect *res_rect,
+	const struct mdss_rect *dst_rect,
+	const struct mdss_rect *sci_rect);
+void mdss_mdp_crop_rect(struct mdss_rect *src_rect,
+	struct mdss_rect *dst_rect,
+	const struct mdss_rect *sci_rect);
 
 
 int mdss_mdp_wb_kickoff(struct msm_fb_data_type *mfd);

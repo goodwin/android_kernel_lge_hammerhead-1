@@ -84,6 +84,13 @@ enum {
 	MODE_GPIO_LOW,
 };
 
+struct mdss_rect {
+	u16 x;
+	u16 y;
+	u16 w;
+	u16 h;
+};
+
 #define MDSS_MAX_PANEL_LEN      256
 #define MDSS_INTF_MAX_NAME_LEN 5
 struct mdss_panel_intf {
@@ -138,8 +145,9 @@ struct mdss_panel_recovery {
  * @MDSS_EVENT_PANEL_CLK_CTRL:	panel clock control
 				 - 0 clock disable
 				 - 1 clock enable
- * @MDSS_EVENT_ENABLE_PARTIAL_UPDATE: Event to update ROI of the panel.
+ * @MDSS_EVENT_ENABLE_PARTIAL_ROI: Event to update ROI of the panel.
  * @MDSS_EVENT_DSI_CMDLIST_KOFF: acquire dsi_mdp_busy lock before kickoff.
+ * @MDSS_EVENT_DSI_STREAM_SIZE: Event to update DSI controller's stream size
  * @MDSS_EVENT_DSI_DYNAMIC_SWITCH: Event to update the dsi driver structures
  *				based on the dsi mode passed as argument.
  *				- 0: update to video mode
@@ -161,7 +169,8 @@ enum mdss_intf_events {
 	MDSS_EVENT_FB_REGISTERED,
 	MDSS_EVENT_PANEL_CLK_CTRL,
 	MDSS_EVENT_DSI_CMDLIST_KOFF,
-	MDSS_EVENT_ENABLE_PARTIAL_UPDATE,
+	MDSS_EVENT_ENABLE_PARTIAL_ROI,
+	MDSS_EVENT_DSI_STREAM_SIZE,
 	MDSS_EVENT_REGISTER_RECOVERY_HANDLER,
 	MDSS_EVENT_DSI_DYNAMIC_SWITCH,
 };
@@ -328,10 +337,7 @@ struct mdss_panel_info {
 	u32 off_pre_rst_delay;
 	u32 off_post_rst_delay;
 	u32 vic; /* video identification code */
-	u32 roi_x;
-	u32 roi_y;
-	u32 roi_w;
-	u32 roi_h;
+	struct mdss_rect roi;
 	int bklt_ctrl;	/* backlight ctrl */
 	int pwm_pmic_gpio;
 	int pwm_lpg_chan;
@@ -355,6 +361,8 @@ struct mdss_panel_info {
 
 	u32 cont_splash_enabled;
 	u32 partial_update_enabled;
+	u32 partial_update_dcs_cmd_by_left;
+	u32 partial_update_roi_merge;
 	struct ion_handle *splash_ihdl;
 	int panel_power_state;
 	int blank_state;
@@ -433,6 +441,19 @@ static inline u32 mdss_panel_get_framerate(struct mdss_panel_info *panel_info)
 		break;
 	}
 	return frame_rate;
+}
+
+/*
+ * mdss_rect_cmp() - compares two rects
+ * @rect1 - rect value to compare
+ * @rect2 - rect value to compare
+ *
+ * Returns 1 if the rects are same, 0 otherwise.
+ */
+static inline int mdss_rect_cmp(struct mdss_rect *rect1,
+		struct mdss_rect *rect2) {
+	return (rect1->x == rect2->x && rect1->y == rect2->y &&
+		rect1->w == rect2->w && rect1->h == rect2->h);
 }
 
 /*
